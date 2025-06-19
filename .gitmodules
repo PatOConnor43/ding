@@ -1,0 +1,3 @@
+[submodule "curl-parser"]
+	path = curl-parser
+	url = git@github.com:tyrchen/curl-parser
