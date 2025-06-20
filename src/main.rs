@@ -15,6 +15,12 @@ struct Args {
     #[arg(short, long, value_name = "FILE")]
     spec: PathBuf,
 
+    /// Print suggested cursor position.
+    ///
+    /// This option will be used to print a zero-based index of the suggested cursor position in the output before printing the output on the next line.
+    #[arg(short, long)]
+    with_cursor: bool,
+
     /// Read input from stdin if provided
     #[arg(hide = true)]
     stdin_input: Option<String>,
@@ -24,6 +30,7 @@ struct Args {
 fn main() -> anyhow::Result<()> {
     // Parse command line arguments
     let args = Args::parse();
+    let with_cursor = args.with_cursor;
 
     let mut buffer = String::new();
     io::stdin()
@@ -111,55 +118,111 @@ fn main() -> anyhow::Result<()> {
         std::process::exit(1);
     }
     let parameters = parameters.unwrap();
-    for (name, param) in parameters.iter() {
-        if let Some(value) = parsed_request
-            .headers
-            .get(http::header::HeaderName::from_str(name).unwrap())
-        {
-            // If the parameter is already set in the request, skip it
-            continue;
-        }
-        // If the parameter is not set, add it to the request headers
-        if let Parameter::Header { parameter_data, .. } = param {
-            let name = &parameter_data.name;
-            let value = parameter_data
-                .example
-                .as_ref()
-                .unwrap_or(&serde_json::Value::String("".to_string()))
-                .to_string();
-            let header_value = http::header::HeaderValue::from_str(&value)
-                .unwrap_or_else(|_| http::header::HeaderValue::from_static("invalid"));
-            parsed_request.headers.append(
-                http::header::HeaderName::from_str(name).unwrap(),
-                header_value,
-            );
-        }
-        if let Parameter::Query { parameter_data, .. } = param {
-            if parsed_request.data_url_encoded.contains_key(*name) {
-                // If the query parameter is already set, skip it
-                continue;
-            }
-            let name = &parameter_data.name;
-            let value = parameter_data.example.as_ref();
-            let value = match value {
-                Some(v) => v.to_string(),
-                None => "".to_string(),
+    let first_empty_spec_parameter = get_first_empty_spec_parameter(&parameters, &parsed_request);
+    match first_empty_spec_parameter {
+        Some(empty_parameter) => {
+            let replacement_paremeter = match empty_parameter {
+                EmptySpecParameter::Header(name) => {
+                    parsed_request.headers.remove(&name);
+                    let parameter_position =
+                        parameters.iter().position(|(n, _)| *n == &name).unwrap();
+                    let mut next_parameter = parameters.iter().nth(parameter_position + 1);
+                    if next_parameter.is_none() {
+                        next_parameter = parameters.iter().next()
+                    }
+
+                    next_parameter.unwrap().1
+                }
+                EmptySpecParameter::Query(name) => {
+                    parsed_request.data_url_encoded.remove(&name);
+                    let parameter_position =
+                        parameters.iter().position(|(n, _)| *n == &name).unwrap();
+                    let mut next_parameter = parameters.iter().nth(parameter_position + 1);
+                    if next_parameter.is_none() {
+                        next_parameter = parameters.iter().next()
+                    }
+
+                    next_parameter.unwrap().1
+                }
             };
-            parsed_request
-                .data_url_encoded
-                .insert(name.to_string(), value);
+            match replacement_paremeter {
+                Parameter::Header { parameter_data, .. } => {
+                    let name = &parameter_data.name;
+                    let value = parameter_data
+                        .example
+                        .as_ref()
+                        .unwrap_or(&serde_json::Value::String("".to_string()))
+                        .to_string();
+                    let header_value = http::header::HeaderValue::from_str(&value)
+                        .unwrap_or_else(|_| http::header::HeaderValue::from_static("invalid"));
+                    parsed_request.headers.insert(
+                        http::header::HeaderName::from_str(name).unwrap(),
+                        header_value,
+                    );
+                }
+                Parameter::Query { parameter_data, .. } => {
+                    let name = &parameter_data.name;
+                    let value = parameter_data.example.as_ref();
+                    let value = match value {
+                        Some(v) => v.to_string(),
+                        None => "".to_string(),
+                    };
+                    parsed_request
+                        .data_url_encoded
+                        .insert(name.to_string(), value);
+                }
+                _ => {}
+            }
         }
-    }
+        None => {
+            for (_, parameter) in parameters.iter() {
+                if let Parameter::Header { parameter_data, .. } = parameter {
+                    let name = &parameter_data.name;
+                    if parsed_request.headers.contains_key(name) {
+                        // If the header is already set, skip it
+                        continue;
+                    }
+                    let value = parameter_data
+                        .example
+                        .as_ref()
+                        .unwrap_or(&serde_json::Value::String("".to_string()))
+                        .to_string();
+                    let header_value = http::header::HeaderValue::from_str(&value)
+                        .unwrap_or_else(|_| http::header::HeaderValue::from_static("invalid"));
+                    parsed_request.headers.insert(
+                        http::header::HeaderName::from_str(name).unwrap(),
+                        header_value,
+                    );
+                    break;
+                } else if let Parameter::Query { parameter_data, .. } = parameter {
+                    let name = &parameter_data.name;
+                    if parsed_request.data_url_encoded.contains_key(name) {
+                        // If the query parameter is already set, skip it
+                        continue;
+                    }
+                    let value = parameter_data.example.as_ref();
+                    let value = match value {
+                        Some(v) => v.to_string(),
+                        None => "".to_string(),
+                    };
+                    parsed_request
+                        .data_url_encoded
+                        .insert(name.to_string(), value);
+                    break;
+                }
+            }
+        }
+    };
 
     // Bail early if the request body is already set
     if parsed_request.body().is_some() {
-        print_result_and_exit(&parsed_request);
+        print_result_and_exit(&parsed_request, with_cursor);
     }
 
     let body = operation.request_body.as_ref();
     if body.is_none() {
         // If no request body is defined, just print the request and exit
-        print_result_and_exit(&parsed_request);
+        print_result_and_exit(&parsed_request, with_cursor);
     }
     let body = body.as_ref().unwrap();
     let body = body.item(&spec.components);
@@ -171,7 +234,7 @@ fn main() -> anyhow::Result<()> {
     let body = body.unwrap();
     if body.content.get("application/json").is_none() {
         // If no JSON content is defined, just print the request and exit
-        print_result_and_exit(&parsed_request);
+        print_result_and_exit(&parsed_request, with_cursor);
     }
     let media_type = body.content.get("application/json").unwrap();
     parsed_request.headers.insert(
@@ -187,14 +250,14 @@ fn main() -> anyhow::Result<()> {
         let example = example.as_ref().unwrap();
         let example_str = serde_json::to_string(example).unwrap_or_else(|_| "{}".to_string());
         parsed_request.body = vec![example_str];
-        print_result_and_exit(&parsed_request);
+        print_result_and_exit(&parsed_request, with_cursor);
         return Ok(());
     }
 
     let schema = media_type.schema.as_ref();
     if schema.is_none() {
         // If no schema is defined, just print the request and exit
-        print_result_and_exit(&parsed_request);
+        print_result_and_exit(&parsed_request, with_cursor);
     }
     let schema = schema.as_ref().unwrap();
     let schema = schema.item(&spec.components);
@@ -212,13 +275,54 @@ fn main() -> anyhow::Result<()> {
             parsed_request.body = vec![example_str]
         }
     };
-    print_result_and_exit(&parsed_request);
+    print_result_and_exit(&parsed_request, with_cursor);
 
     Ok(())
 }
 
-fn print_result_and_exit(request: &curl_parser::ParsedRequest) {
-    let mut request_out = format!("curl -X {} '{}'", request.method, request.url);
+#[derive(Debug)]
+enum EmptySpecParameter {
+    Header(String),
+    Query(String),
+}
+fn get_first_empty_spec_parameter(
+    parameters: &BTreeMap<&String, &Parameter>,
+    parsed_request: &curl_parser::ParsedRequest,
+) -> Option<EmptySpecParameter> {
+    for (name, param) in parameters.iter() {
+        if let Parameter::Header { parameter_data, .. } = param {
+            if let Some(value) = parsed_request.headers.get(*name) {
+                if !value.is_empty() {
+                    // If the header is already set, skip it
+                    continue;
+                }
+                return Some(EmptySpecParameter::Header(name.to_string()));
+            }
+        } else if let Parameter::Query { parameter_data, .. } = param {
+            if let Some(value) = parsed_request.data_url_encoded.get(*name) {
+                if !value.is_empty() {
+                    // If the query parameter is already set, skip it
+                    continue;
+                }
+                return Some(EmptySpecParameter::Query(name.to_string()));
+            }
+        }
+    }
+    None
+}
+
+fn print_result_and_exit(request: &curl_parser::ParsedRequest, with_cursor: bool) {
+    let no_body_with_query_parameters =
+        request.body().is_none() && !request.data_url_encoded.is_empty();
+    let format_dash_dash_get = if no_body_with_query_parameters {
+        "--get "
+    } else {
+        ""
+    };
+    let mut request_out = format!(
+        "curl -X {} {}'{}'",
+        request.method, format_dash_dash_get, request.url
+    );
     for (h, v) in request.headers.iter() {
         let header_value = v.to_str().unwrap_or("invalid");
         let header = format!("-H '{}: {}'", h, header_value);
