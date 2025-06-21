@@ -119,6 +119,29 @@ fn main() -> anyhow::Result<()> {
     }
     let parameters = parameters.unwrap();
     let first_empty_spec_parameter = get_first_empty_spec_parameter(&parameters, &parsed_request);
+    let populated_header_names = parsed_request
+        .headers
+        .iter()
+        .filter_map(|(name, value)| {
+            if value.is_empty() {
+                None
+            } else {
+                Some(name.to_string())
+            }
+        })
+        .collect::<Vec<_>>();
+    let populated_query_names = parsed_request
+        .data_url_encoded
+        .iter()
+        .filter_map(|(name, value)| {
+            if value.is_empty() {
+                None
+            } else {
+                Some(name.to_string())
+            }
+        })
+        .collect::<Vec<_>>();
+
     match first_empty_spec_parameter {
         Some(empty_parameter) => {
             let replacement_paremeter = match empty_parameter {
@@ -126,23 +149,45 @@ fn main() -> anyhow::Result<()> {
                     parsed_request.headers.remove(&name);
                     let parameter_position =
                         parameters.iter().position(|(n, _)| *n == &name).unwrap();
-                    let mut next_parameter = parameters.iter().nth(parameter_position + 1);
-                    if next_parameter.is_none() {
-                        next_parameter = parameters.iter().next()
+                    let mut next_parameter_iter = parameters.iter().cycle();
+                    let mut next_parameter =
+                        next_parameter_iter.nth(parameter_position + 1).unwrap();
+                    let max_iterations = parameters.len();
+                    let mut iterations = 0;
+                    loop {
+                        let next_name = next_parameter.1.parameter_data_ref().name.to_string();
+                        if !populated_header_names.contains(&next_name)
+                            || iterations >= max_iterations
+                        {
+                            break;
+                        }
+                        next_parameter = next_parameter_iter.next().unwrap();
+                        iterations += 1;
                     }
 
-                    next_parameter.unwrap().1
+                    next_parameter.1
                 }
                 EmptySpecParameter::Query(name) => {
                     parsed_request.data_url_encoded.remove(&name);
                     let parameter_position =
                         parameters.iter().position(|(n, _)| *n == &name).unwrap();
-                    let mut next_parameter = parameters.iter().nth(parameter_position + 1);
-                    if next_parameter.is_none() {
-                        next_parameter = parameters.iter().next()
+                    let mut next_parameter_iter = parameters.iter().cycle();
+                    let mut next_parameter =
+                        next_parameter_iter.nth(parameter_position + 1).unwrap();
+                    let max_iterations = parameters.len();
+                    let mut iterations = 0;
+                    loop {
+                        let next_name = next_parameter.1.parameter_data_ref().name.to_string();
+                        if !populated_query_names.contains(&next_name)
+                            || iterations >= max_iterations
+                        {
+                            break;
+                        }
+                        next_parameter = next_parameter_iter.next().unwrap();
+                        iterations += 1;
                     }
 
-                    next_parameter.unwrap().1
+                    next_parameter.1
                 }
             };
             match replacement_paremeter {
@@ -315,7 +360,7 @@ fn print_result_and_exit(request: &curl_parser::ParsedRequest, with_cursor: bool
     let no_body_with_query_parameters =
         request.body().is_none() && !request.data_url_encoded.is_empty();
     let format_dash_dash_get = if no_body_with_query_parameters {
-        "--get "
+        "-G "
     } else {
         ""
     };
@@ -342,6 +387,10 @@ fn print_result_and_exit(request: &curl_parser::ParsedRequest, with_cursor: bool
             .map(|(k, v)| format!("--data-urlencode '{}={}'", k, v))
             .collect();
         request_out.push_str(&format!(" {}", data.join(" ")));
+    }
+    if with_cursor {
+        let cursor_position = request_out.len() - 1;
+        request_out.insert_str(0, &format!("{}\n", cursor_position));
     }
     std::io::stdout()
         .write_all(request_out.as_bytes())
