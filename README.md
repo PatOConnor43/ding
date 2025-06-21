@@ -129,8 +129,9 @@ I wrote this so I could actually use it _while_ I'm writing the `curl` command. 
 
 ```zsh
 ding() {
-    DING=`echo -n "$BUFFER" | ding --spec <path/to/openapi.yaml>`
-    BUFFER="$DING"
+    DING=`echo -n "$BUFFER" | ding --spec <path/to/openapi.yaml> --with-cursor`
+    BUFFER=`echo -n "$DING" | tail -n +2`
+    CURSOR=`echo -n "$DING" | head -n1`
 }
 zle -N ding
 bindkey '^X^X' ding
