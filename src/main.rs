@@ -17,9 +17,9 @@ struct Args {
 
     /// Print suggested cursor position.
     ///
-    /// This option will be used to print a zero-based index of the suggested cursor position in the output before printing the output on the next line.
+    /// If this option is set, the output will be in JSON format with metadata
     #[arg(short, long)]
-    with_cursor: bool,
+    json: bool,
 
     /// Read input from stdin if provided
     #[arg(hide = true)]
@@ -27,21 +27,32 @@ struct Args {
     // TODO probably add an option so you can specify a prefix on the paths
 }
 
+#[derive(Debug, serde::Serialize)]
+struct OutputMetadata {
+    cursor_position: usize,
+    stdout: String,
+}
+
 fn main() -> anyhow::Result<()> {
     // Parse command line arguments
     let args = Args::parse();
-    let with_cursor = args.with_cursor;
+    let json_out = args.json;
 
     let mut buffer = String::new();
     io::stdin()
         .read_to_string(&mut buffer)
         .expect("Failed to read from stdin");
 
-    let curl_exists = buffer.trim().starts_with("curl");
-    if !curl_exists {
+    let mut a = buffer.split('|');
+    let curl_command_position = a.position(|part| part.trim().starts_with("curl"));
+    if curl_command_position.is_none() {
+        // If no curl command is found, just print the input and exit
         io::stdout().write_all(buffer.as_bytes())?;
         return Ok(());
     }
+    let curl_command_position = curl_command_position.unwrap();
+    let curl_command = buffer.split('|').nth(curl_command_position).unwrap().trim();
+
     let spec_path = args.spec;
     if !spec_path.exists() {
         io::stdout().write_all(buffer.as_bytes())?;
@@ -69,7 +80,7 @@ fn main() -> anyhow::Result<()> {
     }
     let spec = spec.unwrap();
 
-    let parsed_request = curl_parser::ParsedRequest::from_str(buffer.trim());
+    let parsed_request = curl_parser::ParsedRequest::from_str(curl_command);
     if let Err(e) = parsed_request {
         io::stdout().write_all(buffer.as_bytes())?;
         //eprintln!("Error parsing curl command: {}", e);
@@ -261,13 +272,13 @@ fn main() -> anyhow::Result<()> {
 
     // Bail early if the request body is already set
     if parsed_request.body().is_some() {
-        print_result_and_exit(&parsed_request, with_cursor);
+        print_result_and_exit(&parsed_request, json_out, &buffer, curl_command_position);
     }
 
     let body = operation.request_body.as_ref();
     if body.is_none() {
         // If no request body is defined, just print the request and exit
-        print_result_and_exit(&parsed_request, with_cursor);
+        print_result_and_exit(&parsed_request, json_out, &buffer, curl_command_position);
     }
     let body = body.as_ref().unwrap();
     let body = body.item(&spec.components);
@@ -279,7 +290,7 @@ fn main() -> anyhow::Result<()> {
     let body = body.unwrap();
     if body.content.get("application/json").is_none() {
         // If no JSON content is defined, just print the request and exit
-        print_result_and_exit(&parsed_request, with_cursor);
+        print_result_and_exit(&parsed_request, json_out, &buffer, curl_command_position);
     }
     let media_type = body.content.get("application/json").unwrap();
     parsed_request.headers.insert(
@@ -295,14 +306,14 @@ fn main() -> anyhow::Result<()> {
         let example = example.as_ref().unwrap();
         let example_str = serde_json::to_string(example).unwrap_or_else(|_| "{}".to_string());
         parsed_request.body = vec![example_str];
-        print_result_and_exit(&parsed_request, with_cursor);
+        print_result_and_exit(&parsed_request, json_out, &buffer, curl_command_position);
         return Ok(());
     }
 
     let schema = media_type.schema.as_ref();
     if schema.is_none() {
         // If no schema is defined, just print the request and exit
-        print_result_and_exit(&parsed_request, with_cursor);
+        print_result_and_exit(&parsed_request, json_out, &buffer, curl_command_position);
     }
     let schema = schema.as_ref().unwrap();
     let schema = schema.item(&spec.components);
@@ -320,7 +331,7 @@ fn main() -> anyhow::Result<()> {
             parsed_request.body = vec![example_str]
         }
     };
-    print_result_and_exit(&parsed_request, with_cursor);
+    print_result_and_exit(&parsed_request, json_out, &buffer, curl_command_position);
 
     Ok(())
 }
@@ -356,7 +367,12 @@ fn get_first_empty_spec_parameter(
     None
 }
 
-fn print_result_and_exit(request: &curl_parser::ParsedRequest, with_cursor: bool) {
+fn print_result_and_exit(
+    request: &curl_parser::ParsedRequest,
+    json_out: bool,
+    original_buffer: &str,
+    command_position: usize,
+) {
     let no_body_with_query_parameters =
         request.body().is_none() && !request.data_url_encoded.is_empty();
     let format_dash_dash_get = if no_body_with_query_parameters {
@@ -365,12 +381,12 @@ fn print_result_and_exit(request: &curl_parser::ParsedRequest, with_cursor: bool
         ""
     };
     let mut request_out = format!(
-        "curl -X {} {}'{}'",
+        "curl -X {} {}{}",
         request.method, format_dash_dash_get, request.url
     );
     for (h, v) in request.headers.iter() {
         let header_value = v.to_str().unwrap_or("invalid");
-        let header = format!("-H '{}: {}'", h, header_value);
+        let header = format!("-H \"{}: {}\"", h, header_value);
         request_out.push_str(&format!(" {}", header));
     }
     if let Some(body) = request.body() {
@@ -379,7 +395,7 @@ fn print_result_and_exit(request: &curl_parser::ParsedRequest, with_cursor: bool
             &serde_json::from_str::<serde_json::Value>(&body_str).unwrap_or_default(),
         )
         .unwrap_or_else(|_| "{}".to_string());
-        request_out.push_str(&format!(" -d $'{}'", value));
+        request_out.push_str(&format!(" -d '{}'", value));
     } else if !request.data_url_encoded.is_empty() {
         let data: Vec<String> = request
             .data_url_encoded
@@ -388,13 +404,33 @@ fn print_result_and_exit(request: &curl_parser::ParsedRequest, with_cursor: bool
             .collect();
         request_out.push_str(&format!(" {}", data.join(" ")));
     }
-    if with_cursor {
-        let cursor_position = request_out.len() - 1;
-        request_out.insert_str(0, &format!("{}\n", cursor_position));
+    let mut with_cursor_position = request_out.len() - 1;
+    let mut commands_slice = original_buffer
+        .split('|')
+        .map(|c| c.trim())
+        .collect::<Vec<_>>();
+    commands_slice[command_position] = &request_out;
+    let padding_string = " | ";
+    let request_out = commands_slice.join(padding_string);
+    for cmd in commands_slice[..command_position].iter() {
+        with_cursor_position += cmd.len();
     }
-    std::io::stdout()
-        .write_all(request_out.as_bytes())
-        .expect("Failed to write to stdout");
+    if json_out {
+        let metadata = OutputMetadata {
+            cursor_position: with_cursor_position,
+            stdout: request_out,
+        };
+        let json_output =
+            serde_json::to_string(&metadata).expect("Failed to serialize output metadata to JSON");
+        std::io::stdout()
+            .write_all(json_output.as_bytes())
+            .expect("Failed to write JSON output to stdout");
+    } else {
+        std::io::stdout()
+            .write_all(request_out.as_bytes())
+            .expect("Failed to write to stdout");
+    }
+
     std::process::exit(0);
 }
 
