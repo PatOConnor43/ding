@@ -31,6 +31,7 @@ struct Args {
 struct OutputMetadata {
     cursor_position: usize,
     stdout: String,
+    error: Option<String>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -46,9 +47,8 @@ fn main() -> anyhow::Result<()> {
     let mut a = buffer.split('|');
     let curl_command_position = a.position(|part| part.trim().starts_with("curl"));
     if curl_command_position.is_none() {
-        // If no curl command is found, just print the input and exit
-        io::stdout().write_all(buffer.as_bytes())?;
-        return Ok(());
+        print_error(&buffer, "", json_out);
+        std::process::exit(0);
     }
     let curl_command_position = curl_command_position.unwrap();
     let curl_command = buffer.split('|').nth(curl_command_position).unwrap().trim();
@@ -56,12 +56,21 @@ fn main() -> anyhow::Result<()> {
     let spec_path = args.spec;
     if !spec_path.exists() {
         io::stdout().write_all(buffer.as_bytes())?;
+        print_error(&buffer, "Specification path does not exist", json_out);
         std::process::exit(1);
     }
-    let spec_content =
-        std::fs::read_to_string(&spec_path).expect("Failed to read OpenAPI specification file");
+    let spec_content = std::fs::read_to_string(&spec_path);
+    if let Err(e) = spec_content {
+        print_error(
+            &buffer,
+            &format!("Failed to read specification file: {}", e),
+            json_out,
+        );
+        std::process::exit(1);
+    }
+    let spec_content = spec_content.unwrap();
     if spec_content.is_empty() {
-        io::stdout().write_all(buffer.as_bytes())?;
+        print_error(&buffer, "Specification file is empty", json_out);
         std::process::exit(1);
     }
     // For JSON spec
@@ -74,16 +83,22 @@ fn main() -> anyhow::Result<()> {
             .map_err(|e| anyhow::anyhow!("Failed to parse YAML OpenAPI spec: {}", e))
     };
     if let Err(e) = spec {
-        io::stdout().write_all(buffer.as_bytes())?;
-        //eprintln!("Error parsing OpenAPI spec: {}", e);
+        print_error(
+            &buffer,
+            &format!("Failed to deserialize specification as json or yaml: {}", e),
+            json_out,
+        );
         std::process::exit(1);
     }
     let spec = spec.unwrap();
 
     let parsed_request = curl_parser::ParsedRequest::from_str(curl_command);
     if let Err(e) = parsed_request {
-        io::stdout().write_all(buffer.as_bytes())?;
-        //eprintln!("Error parsing curl command: {}", e);
+        print_error(
+            &buffer,
+            &format!("Failed parsing curl command: {}", e),
+            json_out,
+        );
         std::process::exit(1);
     }
     let mut parsed_request = parsed_request.unwrap();
@@ -91,14 +106,12 @@ fn main() -> anyhow::Result<()> {
     let path = parsed_request.url.path();
     let match_path = spec.paths.paths.get(path);
     if match_path.is_none() {
-        io::stdout().write_all(buffer.as_bytes())?;
-        //eprintln!("No matching path found in OpenAPI spec for path: {}", path);
+        print_error(&buffer, "No matching path in specification", json_out);
         std::process::exit(1);
     }
     let match_path = match_path.unwrap().as_item();
     if match_path.is_none() {
-        io::stdout().write_all(buffer.as_bytes())?;
-        //eprintln!("No matching path found in OpenAPI spec for path: {}", path);
+        print_error(&buffer, "No matching path in specification", json_out);
         std::process::exit(1);
     }
     let match_path = match_path.unwrap();
@@ -114,18 +127,17 @@ fn main() -> anyhow::Result<()> {
         _ => &None,
     };
     if operation.is_none() {
-        io::stdout().write_all(buffer.as_bytes())?;
-        //eprintln!(
-        //    "No matching operation found in OpenAPI spec for method: {}",
-        //    method
-        //);
+        print_error(&buffer, "No matching operation in specification", json_out);
         std::process::exit(1);
     }
     let operation = operation.as_ref().unwrap();
     let parameters = parameter_map(&operation.parameters, &spec.components);
     if let Err(e) = parameters {
-        io::stdout().write_all(buffer.as_bytes())?;
-        //eprintln!("Error processing parameters: {}", e);
+        print_error(
+            &buffer,
+            &format!("Failed to retrieve parameters: {}", e),
+            json_out,
+        );
         std::process::exit(1);
     }
     let parameters = parameters.unwrap();
@@ -283,8 +295,11 @@ fn main() -> anyhow::Result<()> {
     let body = body.as_ref().unwrap();
     let body = body.item(&spec.components);
     if body.is_err() {
-        io::stdout().write_all(buffer.as_bytes())?;
-        //eprintln!("Error retrieving request body: {}", body.unwrap_err());
+        print_error(
+            &buffer,
+            &format!("Error retrieving request body: {}", body.unwrap_err()),
+            json_out,
+        );
         std::process::exit(1);
     }
     let body = body.unwrap();
@@ -318,12 +333,15 @@ fn main() -> anyhow::Result<()> {
     let schema = schema.as_ref().unwrap();
     let schema = schema.item(&spec.components);
     if schema.is_err() {
-        io::stdout().write_all(buffer.as_bytes())?;
-        //eprintln!("Error retrieving schema: {}", schema.unwrap_err());
+        print_error(
+            &buffer,
+            &format!("Error retrieving example schema: {}", schema.unwrap_err()),
+            json_out,
+        );
         std::process::exit(1);
     }
     let schema = schema.unwrap();
-    if let openapiv3::SchemaKind::Type(t) = &schema.schema_kind {
+    if let openapiv3::SchemaKind::Type(_) = &schema.schema_kind {
         if schema.schema_data.example.is_some() {
             // If the schema has an example, use it as the request body
             let example = schema.schema_data.example.as_ref().unwrap();
@@ -423,6 +441,7 @@ fn print_result_and_exit(
         let metadata = OutputMetadata {
             cursor_position: with_cursor_position,
             stdout: request_out,
+            error: None,
         };
         let json_output =
             serde_json::to_string(&metadata).expect("Failed to serialize output metadata to JSON");
@@ -436,6 +455,30 @@ fn print_result_and_exit(
     }
 
     std::process::exit(0);
+}
+fn print_error(buffer: &str, message: &str, json_out: bool) {
+    match json_out {
+        true => {
+            let metadata = OutputMetadata {
+                cursor_position: buffer.len() - 1,
+                stdout: buffer.to_string(),
+                error: Some(message.to_string()),
+            };
+            let json_output = serde_json::to_string(&metadata)
+                .expect("Failed to serialize output metadata to JSON");
+            std::io::stdout()
+                .write_all(json_output.as_bytes())
+                .expect("Failed to write JSON output to stdout");
+        }
+        false => {
+            io::stderr()
+                .write_all(message.as_bytes())
+                .unwrap_or_default();
+            io::stdout()
+                .write_all(buffer.as_bytes())
+                .unwrap_or_default();
+        }
+    }
 }
 
 pub(crate) trait ReferenceOrExt<T: ComponentLookup> {
