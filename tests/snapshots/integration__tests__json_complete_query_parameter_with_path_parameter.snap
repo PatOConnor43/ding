@@ -1,0 +1,5 @@
+---
+source: tests/integration.rs
+expression: output_str
+---
+{"cursor_position":72,"stdout":"curl -X GET -G https://localhost:9000/pets/123 --data-urlencode 'expand='"}

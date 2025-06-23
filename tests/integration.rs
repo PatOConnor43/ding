@@ -422,4 +422,55 @@ mod tests {
         let output_str = String::from_utf8_lossy(&output.stdout);
         insta::assert_snapshot!(output_str);
     }
+
+    #[test]
+    fn json_complete_query_parameter_with_path_parameter() {
+        let mut cmd = Command::new(get_cargo_bin("ding"));
+        let cmd = cmd
+            .arg("--spec")
+            .arg("tests/petstore.yaml")
+            .arg("--json")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped());
+
+        let mut child = cmd.spawn().expect("Failed to spawn command");
+
+        // Write to stdin
+        if let Some(stdin) = child.stdin.take() {
+            let mut stdin = stdin;
+            stdin
+                .write_all(b"curl -X GET https://localhost:9000/pets/123")
+                .expect("Failed to write to stdin");
+        }
+        let output = child
+            .wait_with_output()
+            .expect("Failed to wait for command");
+        let output_str = String::from_utf8_lossy(&output.stdout);
+        insta::assert_snapshot!(output_str);
+    }
+    #[test]
+    fn json_complete_query_parameter_with_path_parameter_nested() {
+        let mut cmd = Command::new(get_cargo_bin("ding"));
+        let cmd = cmd
+            .arg("--spec")
+            .arg("tests/petstore.yaml")
+            .arg("--json")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped());
+
+        let mut child = cmd.spawn().expect("Failed to spawn command");
+
+        // Write to stdin
+        if let Some(stdin) = child.stdin.take() {
+            let mut stdin = stdin;
+            stdin
+                .write_all(b"curl -X GET https://localhost:9000/pets/123/owner")
+                .expect("Failed to write to stdin");
+        }
+        let output = child
+            .wait_with_output()
+            .expect("Failed to wait for command");
+        let output_str = String::from_utf8_lossy(&output.stdout);
+        insta::assert_snapshot!(output_str);
+    }
 }
