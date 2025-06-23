@@ -1,0 +1,7 @@
+---
+source: tests/integration.rs
+expression: output_str
+---
+curl -X POST https://localhost:9000/pets -H "content-type: application/json" -H "accept: application/json" -d '{
+  "name": "Rover"
+}'

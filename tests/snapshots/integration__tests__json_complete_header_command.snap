@@ -1,0 +1,5 @@
+---
+source: tests/integration.rs
+expression: output_str
+---
+{"cursor_position":57,"stdout":"curl -X GET https://localhost:9000/petsHeader -H \"limit: \""}

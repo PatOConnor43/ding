@@ -1,0 +1,5 @@
+---
+source: tests/integration.rs
+expression: output_str
+---
+{"cursor_position":132,"stdout":"curl -X POST https://localhost:9000/pets -H \"content-type: application/json\" -H \"accept: application/json\" -d '{\n  \"name\": \"Rover\"\n}'"}

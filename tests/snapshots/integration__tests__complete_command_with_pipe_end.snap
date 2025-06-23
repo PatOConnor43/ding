@@ -1,0 +1,5 @@
+---
+source: tests/integration.rs
+expression: output_str
+---
+curl -X GET -G https://localhost:9000/pets --data-urlencode 'limit=' | jq .
