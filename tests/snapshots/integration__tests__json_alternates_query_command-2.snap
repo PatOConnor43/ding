@@ -2,4 +2,4 @@
 source: tests/integration.rs
 expression: output_str
 ---
-{"cursor_position":66,"stdout":"curl -X GET -G https://localhost:9000/pets --data-urlencode 'page='"}
+{"cursor_position":67,"stdout":"curl -X GET -G https://localhost:9000/pets --data-urlencode 'limit='"}

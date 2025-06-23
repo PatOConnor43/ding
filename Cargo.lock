@@ -259,6 +259,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "wayfind",
 ]
 
 [[package]]
@@ -1541,6 +1542,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a05d73b933a847d6cccdda8f838a22ff101ad9bf93e33684f39c1f5f0eece3d"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "wayfind"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c36f9a76db537116dbb9b4dd684e0a32b5632b425ce4c02cc9a8fad1d5464d4a"
+dependencies = [
+ "smallvec",
 ]
 
 [[package]]

@@ -31,6 +31,7 @@ struct Args {
 struct OutputMetadata {
     cursor_position: usize,
     stdout: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
 }
 
@@ -104,7 +105,20 @@ fn main() -> anyhow::Result<()> {
     let mut parsed_request = parsed_request.unwrap();
     parsed_request.headers.remove(http::header::ACCEPT);
     let path = parsed_request.url.path();
-    let match_path = spec.paths.paths.get(path);
+    let mut wayfinder = wayfind::Router::new();
+    for (path_template, _) in spec.paths.paths.iter() {
+        let path_template = path_template.to_string();
+        wayfinder.insert(&path_template, ()).unwrap();
+    }
+    let wayfinder_match = wayfinder.search(path);
+    if wayfinder_match.is_none() {
+        print_error(&buffer, "No matching path in specification", json_out);
+        std::process::exit(1);
+    }
+    let wayfinder_match = wayfinder_match.unwrap();
+    let template = wayfinder_match.template;
+
+    let match_path = spec.paths.paths.get(template);
     if match_path.is_none() {
         print_error(&buffer, "No matching path in specification", json_out);
         std::process::exit(1);
@@ -363,9 +377,10 @@ fn get_first_empty_spec_parameter(
     parameters: &BTreeMap<&String, &Parameter>,
     parsed_request: &curl_parser::ParsedRequest,
 ) -> Option<EmptySpecParameter> {
-    for (name, param) in parameters.iter() {
+    for (_, param) in parameters.iter() {
         if let Parameter::Header { parameter_data, .. } = param {
-            if let Some(value) = parsed_request.headers.get(*name) {
+            let name = &parameter_data.name;
+            if let Some(value) = parsed_request.headers.get(name) {
                 if !value.is_empty() {
                     // If the header is already set, skip it
                     continue;
@@ -373,7 +388,8 @@ fn get_first_empty_spec_parameter(
                 return Some(EmptySpecParameter::Header(name.to_string()));
             }
         } else if let Parameter::Query { parameter_data, .. } = param {
-            if let Some(value) = parsed_request.data_url_encoded.get(*name) {
+            let name = &parameter_data.name;
+            if let Some(value) = parsed_request.data_url_encoded.get(name) {
                 if !value.is_empty() {
                     // If the query parameter is already set, skip it
                     continue;
@@ -407,7 +423,6 @@ fn print_result_and_exit(
             true => "",
             false => v.to_str().unwrap_or(""),
         };
-        dbg!(header_value);
         let header = format!("-H \"{}: {}\"", h, header_value);
         request_out.push_str(&format!(" {}", header));
     }

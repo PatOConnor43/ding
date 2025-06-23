@@ -294,13 +294,23 @@ mod tests {
         let output_str = String::from_utf8_lossy(&output_bytes);
         insta::assert_snapshot!(output_str);
 
+        let next_stdin: serde_json::Value =
+            serde_json::from_slice(&output_bytes).expect("Failed to parse JSON from output");
+        let next_stdin = next_stdin
+            .as_object()
+            .expect("Expected JSON object")
+            .get("stdout")
+            .expect("Expected 'stdout' key in JSON")
+            .as_str()
+            .expect("Expected 'stdout' to be a string");
+
         let mut child = cmd.spawn().expect("Failed to spawn command");
 
         // Write to stdin
         if let Some(stdin) = child.stdin.take() {
             let mut stdin = stdin;
             stdin
-                .write_all(&output_bytes)
+                .write_all(next_stdin.as_bytes())
                 .expect("Failed to write to stdin");
         }
         let output = child
@@ -361,6 +371,15 @@ mod tests {
         let output_bytes = output.stdout;
         let output_str = String::from_utf8_lossy(&output_bytes);
         insta::assert_snapshot!(output_str);
+        let next_stdin: serde_json::Value =
+            serde_json::from_slice(&output_bytes).expect("Failed to parse JSON from output");
+        let next_stdin = next_stdin
+            .as_object()
+            .expect("Expected JSON object")
+            .get("stdout")
+            .expect("Expected 'stdout' key in JSON")
+            .as_str()
+            .expect("Expected 'stdout' to be a string");
 
         let mut child = cmd.spawn().expect("Failed to spawn command");
 
@@ -368,7 +387,7 @@ mod tests {
         if let Some(stdin) = child.stdin.take() {
             let mut stdin = stdin;
             stdin
-                .write_all(&output_bytes)
+                .write_all(next_stdin.as_bytes())
                 .expect("Failed to write to stdin");
         }
         let output = child
