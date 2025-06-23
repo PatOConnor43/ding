@@ -139,3 +139,6 @@ bindkey '^X^X' ding
 ```
 This will allow you to press `Ctrl-X Ctrl-X` to run `ding` on the current command in your shell, and it will replace the command with the output of `ding`.
 
+## Contributing
+
+This project uses cargo insta for snapshot testing. You can run the tests normally with `cargo test`. If you are making changes and want to compare the snapshots you can run `cargo insta test --review`.
