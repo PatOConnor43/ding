@@ -385,7 +385,11 @@ fn print_result_and_exit(
         request.method, format_dash_dash_get, request.url
     );
     for (h, v) in request.headers.iter() {
-        let header_value = v.to_str().unwrap_or("invalid");
+        let header_value = match v.is_empty() || v.to_str().unwrap_or("") == "\"\"" {
+            true => "",
+            false => v.to_str().unwrap_or(""),
+        };
+        dbg!(header_value);
         let header = format!("-H \"{}: {}\"", h, header_value);
         request_out.push_str(&format!(" {}", header));
     }
