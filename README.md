@@ -142,3 +142,16 @@ This will allow you to press `Ctrl-X Ctrl-X` to run `ding` on the current comman
 ## Contributing
 
 This project uses cargo insta for snapshot testing. You can run the tests normally with `cargo test`. If you are making changes and want to compare the snapshots you can run `cargo insta test --review`.
+
+### Cargo dist
+This project uses `cargo dist` to build a distributable binary. Specifically this project uses the fork maintained by [astral-sh](https://github.com/astral-sh/cargo-dist). To install it, go to the releases page and install the binary.
+
+Updating `dist` can be done with `dist selfupdate`.
+
+### Releasing
+In order to tag a new release, follow these steps:
+- Checkout master
+- Add a changelog for the version to `RELEASES.md`
+- Commit the changes
+- Run `cargo release patch --no-publish` to dry run the release (minor or major can be used as well)
+- Run `cargo release patch --no-publish --execute` to actually tag the release
