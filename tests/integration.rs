@@ -2,7 +2,7 @@
 mod tests {
 
     use insta_cmd::{Command, assert_cmd_snapshot, get_cargo_bin};
-    use std::io::{Read, Write};
+    use std::io::Write;
 
     #[test]
     fn missing_spec() {
