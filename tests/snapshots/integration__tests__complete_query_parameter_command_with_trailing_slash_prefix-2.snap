@@ -1,0 +1,5 @@
+---
+source: tests/integration.rs
+expression: stderr_str
+---
+Path prefix must not end with a slash

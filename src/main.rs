@@ -21,6 +21,13 @@ struct Args {
     #[arg(short, long)]
     json: bool,
 
+    /// Optional prefix added to paths in the OpenAPI specification
+    ///
+    /// This is helpful when the OpenAPI spec is not at the root of the host. This prefix MUST
+    /// start with a slash and not end with a slash.
+    #[arg(short, long)]
+    path_prefix: Option<String>,
+
     /// Read input from stdin if provided
     #[arg(hide = true)]
     stdin_input: Option<String>,
@@ -47,6 +54,21 @@ fn main() -> anyhow::Result<()> {
     if buffer.is_empty() {
         std::process::exit(0);
     }
+
+    let arg_path_prefix = match &args.path_prefix {
+        Some(prefix) => {
+            if !prefix.starts_with('/') {
+                print_error(&buffer, "Path prefix must start with a slash", json_out);
+                std::process::exit(1);
+            }
+            if prefix.ends_with('/') {
+                print_error(&buffer, "Path prefix must not end with a slash", json_out);
+                std::process::exit(1);
+            }
+            prefix.to_string()
+        }
+        None => String::new(),
+    };
 
     let mut split_by_pipes = buffer.split('|');
     let curl_command_position = split_by_pipes.position(|part| part.trim().starts_with("curl"));
@@ -110,7 +132,7 @@ fn main() -> anyhow::Result<()> {
     let path = parsed_request.url.path();
     let mut wayfinder = wayfind::Router::new();
     for (path_template, _) in spec.paths.paths.iter() {
-        let path_template = path_template.to_string();
+        let path_template = format!("{}{}", &arg_path_prefix, path_template);
         wayfinder.insert(&path_template, ()).unwrap();
     }
     let wayfinder_match = wayfinder.search(path);
@@ -119,7 +141,9 @@ fn main() -> anyhow::Result<()> {
         std::process::exit(1);
     }
     let wayfinder_match = wayfinder_match.unwrap();
-    let template = wayfinder_match.template;
+    let template = wayfinder_match
+        .template
+        .trim_start_matches(&arg_path_prefix);
 
     let match_path = spec.paths.paths.get(template);
     if match_path.is_none() {
