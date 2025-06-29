@@ -2,7 +2,7 @@
 mod tests {
 
     use insta_cmd::{Command, assert_cmd_snapshot, get_cargo_bin};
-    use std::io::Write;
+    use std::io::{Read, Write};
 
     #[test]
     fn missing_spec() {
@@ -448,6 +448,7 @@ mod tests {
         let output_str = String::from_utf8_lossy(&output.stdout);
         insta::assert_snapshot!(output_str);
     }
+
     #[test]
     fn json_complete_query_parameter_with_path_parameter_nested() {
         let mut cmd = Command::new(get_cargo_bin("ding"));
@@ -472,5 +473,92 @@ mod tests {
             .expect("Failed to wait for command");
         let output_str = String::from_utf8_lossy(&output.stdout);
         insta::assert_snapshot!(output_str);
+    }
+
+    #[test]
+    fn complete_query_parameter_command_with_prefix() {
+        let mut cmd = Command::new(get_cargo_bin("ding"));
+        let cmd = cmd
+            .arg("--spec")
+            .arg("tests/petstore.yaml")
+            .arg("--path-prefix")
+            .arg("/api/v1")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped());
+
+        let mut child = cmd.spawn().expect("Failed to spawn command");
+
+        // Write to stdin
+        if let Some(stdin) = child.stdin.take() {
+            let mut stdin = stdin;
+            stdin
+                .write_all(b"curl -X GET https://localhost:9000/api/v1/pets/123/owner")
+                .expect("Failed to write to stdin");
+        }
+        let output = child
+            .wait_with_output()
+            .expect("Failed to wait for command");
+        let output_str = String::from_utf8_lossy(&output.stdout);
+        insta::assert_snapshot!(output_str);
+    }
+
+    #[test]
+    fn complete_query_parameter_command_without_leading_slash_prefix() {
+        let mut cmd = Command::new(get_cargo_bin("ding"));
+        let cmd = cmd
+            .arg("--spec")
+            .arg("tests/petstore.yaml")
+            .arg("--path-prefix")
+            .arg("api/v1")
+            .stdin(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped());
+
+        let mut child = cmd.spawn().expect("Failed to spawn command");
+
+        if let Some(stdin) = child.stdin.take() {
+            let mut stdin = stdin;
+            stdin
+                .write_all(b"curl -X GET https://localhost:9000/api/v1/pets/123/owner")
+                .expect("Failed to write to stdin");
+        }
+        let output = child
+            .wait_with_output()
+            .expect("Failed to wait for command");
+        let output_str = String::from_utf8_lossy(&output.stdout);
+        insta::assert_snapshot!(output_str);
+
+        let stderr_str = String::from_utf8_lossy(&output.stderr);
+        insta::assert_snapshot!(stderr_str);
+    }
+
+    #[test]
+    fn complete_query_parameter_command_with_trailing_slash_prefix() {
+        let mut cmd = Command::new(get_cargo_bin("ding"));
+        let cmd = cmd
+            .arg("--spec")
+            .arg("tests/petstore.yaml")
+            .arg("--path-prefix")
+            .arg("/api/v1/")
+            .stdin(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped());
+
+        let mut child = cmd.spawn().expect("Failed to spawn command");
+
+        if let Some(stdin) = child.stdin.take() {
+            let mut stdin = stdin;
+            stdin
+                .write_all(b"curl -X GET https://localhost:9000/api/v1/pets/123/owner")
+                .expect("Failed to write to stdin");
+        }
+        let output = child
+            .wait_with_output()
+            .expect("Failed to wait for command");
+        let output_str = String::from_utf8_lossy(&output.stdout);
+        insta::assert_snapshot!(output_str);
+
+        let stderr_str = String::from_utf8_lossy(&output.stderr);
+        insta::assert_snapshot!(stderr_str);
     }
 }
