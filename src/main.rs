@@ -44,9 +44,12 @@ fn main() -> anyhow::Result<()> {
     io::stdin()
         .read_to_string(&mut buffer)
         .expect("Failed to read from stdin");
+    if buffer.is_empty() {
+        std::process::exit(0);
+    }
 
-    let mut a = buffer.split('|');
-    let curl_command_position = a.position(|part| part.trim().starts_with("curl"));
+    let mut split_by_pipes = buffer.split('|');
+    let curl_command_position = split_by_pipes.position(|part| part.trim().starts_with("curl"));
     if curl_command_position.is_none() {
         print_error(&buffer, "", json_out);
         std::process::exit(0);

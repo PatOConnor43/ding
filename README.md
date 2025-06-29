@@ -128,14 +128,14 @@ curl -X POST 'http://localhost:8080/pets' -H 'Content-Type: application/json' -d
 I wrote this so I could actually use it _while_ I'm writing the `curl` command. `zsh` has a feature that allows you to create keybindings that run commands and edit the current buffer. You can add this snippet to your `~/.zshrc` file to do something similar:
 
 ```zsh
-ding() {
-    DING=$(echo -n "$BUFFER" | ding --spec <path/to/openapi.yaml> --json)
-    BUFFER=`echo -n "$DING" | jq -r '.stdout'`
-    CURSOR=`echo -n "$DING" | jq -r '.cursor_position'`
+_ding_widget() {
+    DING=`ding --spec <path/to/openapi.yaml> --json <<< "$BUFFER"`
+    BUFFER=`jq -r '.stdout' <<< "$DING"`
+    CURSOR=`jq -r '.cursor_position' <<< "$DING"`
 }
 
-zle -N ding
-bindkey '^X^X' ding
+zle -N _ding_widget
+bindkey '^X^X' _ding_widget
 ```
 This will allow you to press `Ctrl-X Ctrl-X` to run `ding` on the current command in your shell, and it will replace the command with the output of `ding`.
 
